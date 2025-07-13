@@ -1,8 +1,17 @@
+## i3
+
 ### Installation
 
 Seems like ubuntu repository holds old version of i3 (4.17 whereas i3 documentation mentions 4.21), probably a good idea to add their repository.
 
 https://i3wm.org/docs/repositories.html
+
+#### List of stuff to install
+
+* feh (wallpaper)
+* ffmpeg (screen recording)
+* xkbset (mouse-keys)
+* picom (compositor)
 
 ### i3 configuration
 
@@ -40,11 +49,27 @@ EndSection
 EOF
 ```
 
-### TODO
+### Wallpapers
 
-Fix AltGr so that polish keyboard works (ą, ę, ...):
-* https://www.reddit.com/r/i3wm/comments/9ic2dm/i3_cannot_write_national_characters/
-* https://unix.stackexchange.com/questions/240235/bind-alt-but-not-altgr-in-i3
+Add wallpapers to `~/Wallpapers`. They will be randomly selected with `feh`.
 
-Enable bluetooth
+## Picom
+
+Copy config to `~/.config/picom.conf`.
+
+## Kitty
+
+Install from https://sw.kovidgoyal.net/kitty/binary/
+
+Copy config to `~/.config/kitty`.
+
+This config relies on `FiraCode Nerd Font Mono` font, so it needs to be installed from https://www.nerdfonts.com/font-downloads.
+
+## Oh-My-Zsh
+
+TODO
+
+## bin/
+
+Contains some helpful scripts, like ffmpeg screen recording or controling Spotify.
 
