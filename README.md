@@ -17,6 +17,10 @@ https://i3wm.org/docs/repositories.html
 
 Located inside `~/.i3/config.d/` folder (files ending with `.conf` extension). The last line at `~/.i3/config` includes those configuration files.
 
+Install bumblebee-status:
+
+```python3 -m pip install bumblebee-status```
+
 ### Policy Kit
 
 You need to install one of the polkits to have an authentication agent.
