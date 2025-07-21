@@ -19,7 +19,10 @@ Located inside `~/.i3/config.d/` folder (files ending with `.conf` extension). T
 
 Install bumblebee-status:
 
-```python3 -m pip install bumblebee-status```
+```bash
+uv tool install bumblebee-status --with psutil --with netifaces
+```
+
 
 ### Policy Kit
 
