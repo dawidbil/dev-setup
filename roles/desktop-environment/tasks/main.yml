@@ -1,0 +1,123 @@
+---
+- name: Install X11 and display manager
+  apt:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - xorg
+    - gdm3
+  tags: [desktop, x11]
+
+- name: Install i3 window manager
+  apt:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - i3
+  tags: [desktop, i3]
+
+- name: Install picom compositor
+  apt:
+    name: picom
+    state: present
+  tags: [desktop, compositor]
+
+- name: Copy bin directory
+  copy:
+    src: bin/
+    dest: "/home/{{ main_user }}/bin/"
+    owner: "{{ main_user }}"
+    group: "{{ main_group }}"
+    mode: '0755'
+  tags: [desktop, config, bin]
+
+- name: Copy custom i3 config directory
+  copy:
+    src: configs/i3/
+    dest: "/home/{{ main_user }}/.i3/"
+    owner: "{{ main_user }}"
+    group: "{{ main_group }}"
+    mode: '0755'
+  tags: [desktop, i3, config]
+
+- name: Create .config directory for main_user
+  file:
+    path: "/home/{{ main_user }}/.config"
+    state: directory
+    owner: "{{ main_user }}"
+    group: "{{ main_user }}"
+    mode: '0755'
+  tags: [desktop, config, picom]
+
+- name: Deploy picom configuration
+  copy:
+    src: configs/picom.conf
+    dest: "/home/{{ main_user }}/.config/picom.conf"
+    owner: "{{ main_user }}"
+    group: "{{ main_group }}"
+    mode: '0644'
+  tags: [desktop, config, picom]
+
+- name: Ensure bin directory exists
+  file:
+    path: "/home/{{ main_user }}/bin"
+    state: directory
+    mode: '0755'
+
+- name: Copy bin folder to bin
+  copy:
+    src: files/bin/
+    dest: /home/{{ main_user }}/bin/
+    owner: "{{ main_user }}"
+    group: "{{ main_user }}"
+    mode: '0755'
+    directory_mode: '0755'
+    remote_src: no
+
+- name: Install bumblebee-status and modules
+  pip:
+    name: "{{ item }}"
+    executable: pip3
+  loop:
+    - bumblebee-status
+    - psutil
+    - pulsectl
+  tags: [desktop, config, i3]
+
+- name: Enable gdm3 service
+  systemd:
+    name: gdm3
+    enabled: yes
+    state: started
+  tags: [desktop, services]
+
+- name: Install screen recording dependencies
+  apt:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - ffmpeg
+    - scrot
+    - imagemagick
+  tags: [recording, deps]
+
+- name: Create .xprofile file
+  file:
+    path: "/home/{{ main_user }}/.xprofile"
+    state: touch
+    owner: "{{ main_user }}"
+    group: "{{ main_user }}"
+    mode: '0644'
+  tags: [desktop, display]
+
+- name: Ensure 1920x1080 is set at login (persistent xrandr)
+  lineinfile:
+    path: "/home/{{ main_user }}/.xprofile"
+    line: "xrandr --output Virtual1 --mode 1920x1080"
+    insertafter: EOF
+    owner: "{{ main_user }}"
+    group: "{{ main_group }}"
+    mode: '0644'
+  become: true
+  tags: [desktop, display]
+

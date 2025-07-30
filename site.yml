@@ -1,0 +1,17 @@
+---
+- name: Configure Neovim Recording VM
+  hosts: vagrant
+  become: yes
+  gather_facts: yes
+  
+  roles:
+    - base-system
+    - desktop-environment
+    - development-tools
+  
+  post_tasks:
+    - name: Notify completion
+      debug:
+        msg: "Neovim Recording VM setup complete! 🚀"
+      tags: [always]
+

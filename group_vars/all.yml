@@ -1,0 +1,18 @@
+---
+# Global Configuration
+timezone: "UTC"
+locale: "en_US.UTF-8"
+
+# User Configuration
+main_user: vagrant
+main_group: vagrant
+
+# Recording Configuration
+recording_resolution: "1920x1080"
+
+# Automation Environment
+automation_packages:
+  - python3-venv
+  - python3-pip
+  - python3-dev
+
