@@ -1,0 +1,23 @@
+---
+- import_playbook: setup_other_services.yml
+
+- name: Setup Recording Environment
+  hosts: vagrant
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    - name: Disable GUI services for headless mode
+      systemd:
+        name: gdm3
+        enabled: no
+        state: stopped
+      tags: [services]
+      
+    - name: Setup virtual display for recording
+      shell: |
+        export DISPLAY=:1
+        Xvfb :1 -screen 0 {{ recording_resolution }}x24 -ac &
+      become_user: "{{ main_user }}"
+      tags: [display]
+

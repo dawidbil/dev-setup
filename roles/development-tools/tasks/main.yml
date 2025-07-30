@@ -1,0 +1,79 @@
+---
+- name: Add Neovim PPA
+  apt_repository:
+    repo: ppa:neovim-ppa/stable
+    state: present
+  tags: [dev-tools, neovim]
+
+- name: Install Neovim
+  apt:
+    name: neovim
+    state: present
+  tags: [dev-tools, neovim]
+
+- name: Create Neovim config directory
+  file:
+    path: "/home/{{ main_user }}/.config/nvim"
+    state: directory
+    owner: "{{ main_user }}"
+    group: "{{ main_group }}"
+    mode: '0755'
+  tags: [dev-tools, config]
+
+- name: Clone kickstart.nvim to Neovim configuration directory
+  git:
+    repo: https://github.com/dawidbil/kickstart.nvim
+    dest: "/home/{{ main_user }}/.config/nvim"
+    version: master
+    force: yes
+  become_user: "{{ main_user }}"
+
+- name: Install latest kitty using official script
+  shell: |
+    curl -L https://sw.kovidgoyal.net/kitty/installer.sh | sh /dev/stdin launch=n
+    mkdir -p ~/.local/bin
+    ln -sf ~/.local/kitty.app/bin/kitty ~/.local/bin/kitty
+  args:
+    executable: /bin/bash
+  become_user: "{{ main_user }}"
+
+- name: Create kitty config directory
+  file:
+    path: "/home/{{ main_user }}/.config/kitty"
+    state: directory
+    owner: "{{ main_user }}"
+    group: "{{ main_group }}"
+    mode: '0755'
+  tags: [dev-tools, config]
+
+- name: Copy kitty configuration
+  copy:
+    src: configs/kitty/
+    dest: "/home/{{ main_user }}/.config/kitty/"
+    owner: "{{ main_user }}"
+    group: "{{ main_group }}"
+    mode: '0644'
+  tags: [dev-tools, config]
+
+- name: Ensure fonts directory exists
+  file:
+    path: /usr/local/share/fonts/nerd-fonts
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Download Fira Code Nerd Font zip
+  get_url:
+    url: "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.zip"
+    dest: /tmp/FiraCode.zip
+
+- name: Unzip Fira Code Nerd Font
+  unarchive:
+    src: /tmp/FiraCode.zip
+    dest: /usr/local/share/fonts/nerd-fonts/
+    remote_src: yes
+
+- name: Update font cache
+  command: fc-cache -fv
+
