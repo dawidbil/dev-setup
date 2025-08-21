@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROFILES_DIR="${HOME}/.config/picom-profiles"
+DEFAULT="normal.conf"
+
+# Pick profile: arg > rofi menu > default
+pick_profile() {
+  if [[ $# -gt 0 ]]; then
+    echo "$1"
+    return
+  fi
+  # If rofi exists, use it. Otherwise fallback to default.
+  if command -v rofi >/dev/null 2>&1; then
+    find "$PROFILES_DIR" -maxdepth 1 -type f -name "*.conf" -printf "%f\n" \
+      | sort \
+      | rofi -dmenu -p "picom profile" -no-custom
+  else
+    echo "$DEFAULT"
+  fi
+}
+
+profile="$(pick_profile "${1-}")"
+[[ -z "${profile}" ]] && exit 0
+
+conf="${PROFILES_DIR}/${profile}"
+if [[ ! -f "$conf" ]]; then
+  notify-send "picom" "Profile not found: ${profile}" -u normal || true
+  exit 1
+fi
+
+# Hard-restart picom with the chosen config
+pkill picom || true
+# tiny delay so it actually dies first
+sleep 0.2
+picom -b --config "$conf"
+
+# Tell your squishy brain what just happened
+notify-send "picom" "Profile: ${profile}" -u low || true
+echo "picom now running with: $conf"
