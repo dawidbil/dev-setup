@@ -3,12 +3,14 @@
 
 Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/jammy64"  # Ubuntu 22.04 LTS
+  config.vbguest.auto_update = true
   
   # VM Configuration
   config.vm.provider "virtualbox" do |vb|
     vb.memory = "4096"
-    vb.cpus = 2
+    vb.cpus = 4
     vb.name = "dev-setup"
+    vb.customize ["modifyvm", :id, "--clipboard-mode", "bidirectional"]
     vb.customize ["modifyvm", :id, "--vram", "128"]
     vb.customize ["modifyvm", :id, "--graphicscontroller", "vmsvga"]
     vb.gui = ENV['VAGRANT_GUI'] == 'true'

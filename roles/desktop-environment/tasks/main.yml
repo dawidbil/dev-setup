@@ -58,16 +58,16 @@
     mode: '0644'
   tags: [desktop, config, picom]
 
-- name: Ensure bin directory exists
+- name: Ensure .local/bin directory exists
   file:
-    path: "/home/{{ main_user }}/bin"
+    path: "/home/{{ main_user }}/.local/bin"
     state: directory
     mode: '0755'
 
-- name: Copy bin folder to bin
+- name: Copy bin folder to .local/bin
   copy:
     src: files/bin/
-    dest: /home/{{ main_user }}/bin/
+    dest: /home/{{ main_user }}/.local/bin/
     owner: "{{ main_user }}"
     group: "{{ main_user }}"
     mode: '0755'
