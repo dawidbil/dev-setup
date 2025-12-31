@@ -1,0 +1,362 @@
+#!/usr/bin/env -S uv run --script -q
+# vim: filetype=python
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#   "llm>=0.27",
+# ]
+# ///
+"""
+https://harper.blog/2024/03/11/use-an-llm-to-automagically-generate-meaningful-git-commit-messages/
+
+Global prepare-commit-msg hook (Python) that emulates the cool UX of the bash version:
+- Spinner while generating
+- Colorized preview of the commit message
+- Simple merge check (exit if $2 is present)
+- Reads system prompt from ~/.config/prompts/commit-system-prompt.txt if it exists
+- Uses llm Python API with fallback model and rich diagnostics in comments
+
+Env knobs:
+  SKIP_LLM_GITHOOK=1       -> skip entirely
+  SKIP_AUTO_COMMIT=1       -> alias, also skip
+  COMMIT_LLM_MODEL         -> primary model id (default: gpt-5-nano)
+  COMMIT_LLM_FALLBACK      -> fallback model id (default: gpt-5-mini)
+  COMMIT_LLM_MAX_DIFF      -> max diff lines before truncation (default: 2000)
+  COMMIT_LLM_FOOTER=0/1    -> add visible 'AI: fallback=...' footer when fallback used (default: 1)
+"""
+
+import os
+import platform
+import subprocess
+import sys
+import textwrap
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+
+# ANSI color codes
+RED = "\033[0;31m"
+GREEN = "\033[0;32m"
+YELLOW = "\033[0;33m"
+BLUE = "\033[0;34m"
+NC = "\033[0m"
+
+# Config (env override)
+MODEL_PRIMARY = os.getenv("COMMIT_LLM_MODEL", "gpt-5-nano")
+MODEL_FALLBACK = os.getenv("COMMIT_LLM_FALLBACK", "gpt-5-mini")
+MAX_DIFF_LINES = int(os.getenv("COMMIT_LLM_MAX_DIFF", "2000"))
+ADD_FALLBACK_FOOTER = os.getenv("COMMIT_LLM_FOOTER", "1") == "1"
+
+PROMPT_FILE = Path.home() / ".config" / "prompts" / "commit-system-prompt.txt"
+
+# Default in case prompt file missing
+SYSTEM_PROMPT_DEFAULT = """You write Git commit messages in Conventional Commits format.
+
+Rules:
+- Output ONLY the commit message text. No code fences.
+- First line: type(scope?): summary  (max 72 chars)
+- Valid types: feat, fix, refactor, perf, test, docs, build, chore, ci, style
+- Optional body: concise bullets describing WHAT and WHY, not HOW.
+- Mention touched modules/packages in scope when clear.
+- If the change is large or multi-module, favor 'refactor' or 'chore' with clear body.
+"""
+
+# Spinner control
+_spinner_stop = threading.Event()
+
+
+def _run(cmd: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+
+
+def _staged_diff(max_lines: int) -> str:
+    diff = _run(["git", "diff", "--cached"]).stdout
+    if not diff.strip():
+        return ""
+    lines = diff.splitlines()
+    if len(lines) > max_lines:
+        head = "\n".join(lines[:max_lines])
+        tail = f"\n... [diff truncated from {len(lines)} to {max_lines} lines]"
+        return head + tail
+    return diff
+
+
+def _safe_errmsg(e: BaseException, limit: int = 240) -> str:
+    msg = str(e)
+    k = os.getenv("OPENAI_API_KEY")
+    if k:
+        msg = msg.replace(k, "[redacted]")
+    return (msg[:limit] + "…") if len(msg) > limit else msg
+
+
+def _diff_stats() -> str:
+    names = _run(["git", "diff", "--cached", "--name-only"]).stdout.strip().splitlines()
+    return f"{len(names)} files"
+
+
+def _has_non_comment_content(text: str) -> bool:
+    for line in text.splitlines():
+        s = line.strip()
+        if s and not s.startswith("#"):
+            return True
+    return False
+
+
+def _diag_block(**kvs) -> list[str]:
+    lines = ["# --- AI Diagnostics ---"]
+    for k, v in kvs.items():
+        lines.append(f"# {k}: {v}")
+    lines.append("# ----------------------")
+    return lines
+
+
+def _minimal_message_from_names() -> str:
+    names = _run(["git", "diff", "--cached", "--name-only"]).stdout.strip().splitlines()
+    head = ", ".join(names[:3]) + ("..." if len(names) > 3 else "")
+    return f"chore: update {head if head else 'files'}"
+
+
+def _postprocess_commit(text: str) -> str:
+    text = text.strip().replace("\r\n", "\n")
+    parts = text.split("\n", 1)
+    subject = parts[0].strip() if parts else ""
+    body = parts[1].strip() if len(parts) > 1 else ""
+    body = "\n".join([line.rstrip() for line in body.splitlines()]).strip("\n")
+    return subject + ("\n\n" + body if body else "")
+
+
+def _heuristic_needs_fallback(diff: str, output: str) -> str | None:
+    if len(output.strip()) < 12:
+        return "primary output too short"
+    if "WIP" in output or "dummy" in output.lower():
+        return "low-quality output token"
+    if (
+        diff.count("\n") > MAX_DIFF_LINES * 0.9
+        and "refactor" not in output
+        and "chore" not in output
+    ):
+        return "very large diff"
+    return None
+
+
+def _read_system_prompt() -> str:
+    if PROMPT_FILE.exists():
+        try:
+            return PROMPT_FILE.read_text(encoding="utf-8")
+        except Exception:
+            pass
+    return SYSTEM_PROMPT_DEFAULT
+
+
+def _spinner():
+    # Only animate if stdout is a TTY
+    if not sys.stdout.isatty():
+        return
+    glyphs = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    # Hide cursor
+    sys.stdout.write("\033[?25l")
+    sys.stdout.flush()
+    try:
+        while not _spinner_stop.is_set():
+            for g in glyphs:
+                if _spinner_stop.is_set():
+                    break
+                sys.stdout.write(f"\r{YELLOW}{g}{NC} Generating LLM commit message...")
+                sys.stdout.flush()
+                time.sleep(0.1)
+    finally:
+        # Clear line and show cursor
+        sys.stdout.write("\r\033[K\033[?25h\n")
+        sys.stdout.flush()
+
+
+def _print_colored_preview(msg: str):
+    print(f"{BLUE}=== Generated Commit Message ==={NC}")
+    print(f"{GREEN}{msg}{NC}")
+    print(f"{BLUE}================================={NC}\n")
+
+
+def _generate_with_llm(diff: str, system_prompt: str, primary: str, fallback: str):
+    # Import here so the spinner can start ASAP without import delay jerking the cursor
+    import llm
+
+    def _llm_version():
+        try:
+            return getattr(llm, "__version__", "unknown")
+        except Exception:
+            return "unknown"
+
+    env_primary = primary
+    env_fallback = fallback
+
+    prompt = textwrap.dedent(f"""
+    Generate a Conventional Commit message for this staged diff.
+
+    Diff:
+    {diff}
+    """).strip()
+
+    fallback_used = False
+    fallback_reason = ""
+    primary_error = ""
+    fallback_error = ""
+    model_used = env_primary
+
+    def _summarize(model_id: str, sys_prompt: str) -> str:
+        model = llm.get_model(model_id)
+        try:
+            resp = model.prompt(prompt, system=sys_prompt)
+        except TypeError as e:
+            # Older llm versions may not support system=
+            if "system" in str(e):
+                resp = model.prompt(prompt)
+            else:
+                raise
+        return resp.text()
+
+    # Primary attempt
+    try:
+        output = _summarize(env_primary, system_prompt)
+    except Exception as e:
+        primary_error = f"{e.__class__.__name__}: {_safe_errmsg(e)}"
+        fallback_used = True
+        fallback_reason = "primary model error"
+        output = ""
+
+    # Heuristic fallback
+    if not fallback_used:
+        reason = _heuristic_needs_fallback(diff, output)
+        if reason:
+            fallback_used = True
+            fallback_reason = reason
+
+    # Fallback attempt
+    if fallback_used:
+        model_used = env_fallback
+        try:
+            output = _summarize(env_fallback, system_prompt)
+        except Exception as e:
+            fallback_error = f"{e.__class__.__name__}: {_safe_errmsg(e)}"
+            minimal = _minimal_message_from_names()
+            diagnostics = _diag_block(
+                PrimaryModel=env_primary,
+                FallbackModel=env_fallback,
+                MaxDiffLines=MAX_DIFF_LINES,
+                Staged=_diff_stats(),
+                LLM_Version=_llm_version(),
+                Python=platform.python_version(),
+                Host=platform.node(),
+                Time=datetime.now().isoformat(timespec="seconds"),
+            )
+            body = [minimal, ""]
+            body += [f"# Fallback failed: {e.__class__.__name__}"]
+            if primary_error:
+                body += [f"# Primary error: {primary_error}"]
+            body += diagnostics
+            body += ["# Generated by llm + uv; set SKIP_LLM_GITHOOK=1 to bypass"]
+            return (
+                "\n".join(body),
+                model_used,
+                fallback_used,
+                fallback_reason,
+                primary_error,
+                fallback_error,
+                True,
+            )
+
+    final = _postprocess_commit(output)
+    if fallback_used and ADD_FALLBACK_FOOTER:
+        final += f"\n\nAI: fallback={env_fallback}"
+
+    # Build bottom comments
+    comments = [f"# Model used: {model_used}"]
+    if fallback_used:
+        comments.append(f"# Fallback reason: {fallback_reason}")
+    if primary_error:
+        comments.append(f"# Primary error: {primary_error}")
+    if fallback_error:
+        comments.append(f"# Fallback error: {fallback_error}")
+    comments += _diag_block(
+        PrimaryModel=env_primary,
+        FallbackModel=env_fallback,
+        MaxDiffLines=MAX_DIFF_LINES,
+        Staged=_diff_stats(),
+        LLM_Version=_llm_version(),
+        Python=platform.python_version(),
+        Host=platform.node(),
+        Time=datetime.now().isoformat(timespec="seconds"),
+    )
+    comments.append("# Generated by llm + uv; set SKIP_LLM_GITHOOK=1 to bypass")
+
+    return (
+        final + "\n" + "\n".join(comments) + "\n",
+        model_used,
+        fallback_used,
+        fallback_reason,
+        primary_error,
+        fallback_error,
+        False,
+    )
+
+
+def main():
+    # Respect quick skip
+    if os.getenv("SKIP_LLM_GITHOOK") == "1" or os.getenv("SKIP_AUTO_COMMIT") == "1":
+        sys.exit(0)
+
+    if len(sys.argv) < 2:
+        sys.exit(0)
+
+    msgfile = Path(sys.argv[1])
+    # Bash version’s simple merge check: if $2 is present, exit
+    if len(sys.argv) >= 3 and sys.argv[2]:
+        sys.exit(0)
+
+    # If the message already has real content, don't stomp it
+    try:
+        existing = msgfile.read_text(encoding="utf-8")
+        if _has_non_comment_content(existing):
+            # Append provenance comment and leave
+            existing = (
+                existing.rstrip()
+                + "\n\n# No model used: message already has non-comment content\n"
+            )
+            existing += "# Generated by llm + uv; set SKIP_LLM_GITHOOK=1 to bypass\n"
+            msgfile.write_text(existing, encoding="utf-8")
+            sys.exit(0)
+    except Exception:
+        pass
+
+    diff = _staged_diff(MAX_DIFF_LINES)
+    if not diff:
+        # Nothing staged; don’t write comments-only (Git would treat as empty)
+        sys.exit(0)
+
+    system_prompt = _read_system_prompt()
+
+    # Start spinner
+    t = threading.Thread(target=_spinner, daemon=True)
+    t.start()
+
+    try:
+        generated, model_used, used_fallback, fb_reason, p_err, f_err, is_minimal = (
+            _generate_with_llm(diff, system_prompt, MODEL_PRIMARY, MODEL_FALLBACK)
+        )
+    finally:
+        _spinner_stop.set()
+        t.join()
+
+    # Preview like the bash script
+    # Extract just the visible message (without comments) for preview
+    preview = generated.split("\n# ", 1)[0].rstrip()
+    _print_colored_preview(preview)
+
+    # Write out the full message (including comments/diagnostics)
+    msgfile.write_text(generated, encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()
