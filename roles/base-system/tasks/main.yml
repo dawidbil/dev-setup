@@ -1,0 +1,51 @@
+---
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  tags: [base, system]
+
+- name: Upgrade all packages
+  apt:
+    name: "*"
+    state: latest
+  tags: [base, system]
+
+- name: Install base system packages
+  apt:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - build-essential
+    - apt-transport-https
+    - tree
+    - unzip
+    - zip
+    - xdotool
+    - xvfb
+    - btop
+    - ranger
+  tags: [base, packages]
+
+- name: Install Python and pip
+  apt:
+    name: "{{ automation_packages }}"
+    state: present
+  tags: [base, python]
+
+- name: Set timezone
+  timezone:
+    name: "{{ timezone }}"
+  tags: [base, timezone]
+
+- name: Generate locales
+  locale_gen:
+    name: "{{ locale }}"
+    state: present
+  tags: [base, locale]
+
+- name: Set system hostname
+  hostname:
+    name: "{{ vm_hostname | default('neovim-recorder') }}"
+  tags: [base, hostname]
+

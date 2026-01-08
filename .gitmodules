@@ -1,4 +1,0 @@
-[submodule "kickstart.nvim"]
-	path = kickstart.nvim
-	url = https://github.com/dawidbil/kickstart.nvim.git
-	branch = ankle
