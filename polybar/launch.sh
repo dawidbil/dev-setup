@@ -8,4 +8,5 @@ while pgrep -u $UID -x polybar >/dev/null; do sleep 0.5; done
 # Launch Polybar on each monitor
 for m in $(polybar --list-monitors | cut -d: -f1); do
     MONITOR=$m polybar --reload mybar &
+    MONITOR=$m polybar --reload usagebar &
 done
