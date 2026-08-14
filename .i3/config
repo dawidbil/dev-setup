@@ -59,6 +59,9 @@ bindsym $mod+d exec dmenu_run
 # installed.
 # bindsym $mod+d exec --no-startup-id i3-dmenu-desktop
 
+# rofi TODO list: type to add, select to remove (bin/todo.sh)
+bindsym $mod+o exec --no-startup-id ~/marcusv2/bin/todo.sh
+
 # change focus
 bindsym $mod+$left focus left
 bindsym $mod+$down focus down
